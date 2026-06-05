@@ -11,6 +11,16 @@ It's two things in one package:
 
 > The job it does: **the blank page / messy pile → structure.** Point it at a goal, a prompt, or your documents and get back a real, editable page — not another throwaway chat answer.
 
+## See it
+
+**A notebook generated from a prompt** — a structured, editable spread, not a wall of text:
+
+![A Papera notebook generated from a prompt](docs/v2-generation.png)
+
+**Your library** — every generation is a real, kept notebook:
+
+![A Papera notebook library](docs/notebooks.png)
+
 ---
 
 ## Install
