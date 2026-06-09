@@ -4,6 +4,7 @@
 
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import {
   loadConfig,
@@ -17,7 +18,8 @@ import { PaperaClient, PaperaError } from "./client.js";
 import type { DocOptions } from "./doc.js";
 import type { PlanOptions } from "./plan.js";
 
-const VERSION = "0.1.0";
+// Single source of truth for the version: package.json (dist/cli.js → ../package.json).
+const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 function makeClient(): PaperaClient {
   const cfg = loadConfig();
@@ -173,6 +175,81 @@ program
     if (!key) die("Not logged in.", "Run `papera login`.");
     const via = process.env.PAPERA_API_KEY ? "PAPERA_API_KEY env" : CONFIG_PATH;
     ok(`${cfg.email ?? "authenticated"} — key via ${via}`);
+  });
+
+// ── key ────────────────────────────────────────────────────────────────────
+// Print the stored API key so it can be pasted into an MCP host config
+// (PAPERA_API_KEY) on another machine or in CI. On THIS machine no env is
+// needed — the MCP server reads ~/.papera/config.json automatically.
+program
+  .command("key")
+  .description("Print your API key (for PAPERA_API_KEY in MCP configs / CI)")
+  .action(() => {
+    const cfg = loadConfig();
+    const key = resolveApiKey(cfg);
+    if (!key) die("Not logged in.", "Run `papera login` first.");
+    process.stdout.write(`${key}\n`);
+    process.stderr.write(
+      "  Paste this as PAPERA_API_KEY in your MCP host config. Keep it secret — anyone with it can use your Ink.\n",
+    );
+  });
+
+// ── keys (list + revoke) ───────────────────────────────────────────────────
+// Key MANAGEMENT requires your password (a key can't revoke keys — that caps
+// the blast radius of a leak). Lists active keys, then offers revocation.
+program
+  .command("keys")
+  .description("List your API keys and revoke leaked/old ones (asks your password)")
+  .option("--revoke-all", "revoke every key without prompting (you'll need `papera login` after)")
+  .action(async (options: { revokeAll?: boolean }) => {
+    const client = makeClient();
+    try {
+      const cfg = loadConfig();
+      const email = cfg.email || (await prompt("Email: "));
+      const password = await prompt("Password: ", { hidden: true });
+      if (!email || !password) die("Email and password are required.");
+      const session = await client.loginSession(email, password);
+
+      const keys = await client.listKeys(session);
+      if (keys.length === 0) {
+        process.stdout.write("No active API keys.\n");
+        return;
+      }
+      const fmt = (ts: number | null) => (ts ? new Date(ts).toISOString().slice(0, 10) : "never");
+      keys.forEach((k, i) => {
+        process.stdout.write(
+          `${i + 1}. ${k.prefix}…  ${k.name ?? "(unnamed)"}  created ${fmt(k.createdAt)} · last used ${fmt(k.lastUsedAt)}\n`,
+        );
+      });
+
+      let toRevoke: typeof keys = [];
+      if (options.revokeAll) {
+        toRevoke = keys;
+      } else {
+        const answer = await prompt("Revoke which? (number, 'all', or Enter to keep all): ");
+        if (!answer) return;
+        if (answer.toLowerCase() === "all") {
+          toRevoke = keys;
+        } else {
+          const n = parseInt(answer, 10);
+          if (!Number.isInteger(n) || n < 1 || n > keys.length) die(`No key #${answer}.`);
+          toRevoke = [keys[n - 1]];
+        }
+      }
+      for (const k of toRevoke) {
+        await client.revokeKey(session, k.id);
+        process.stdout.write(`  revoked ${k.prefix}…\n`);
+      }
+      ok(`Revoked ${toRevoke.length} key(s).`);
+      // If the locally stored key was among them, the next command would 401 —
+      // tell the user now instead of letting them hit it.
+      const localPrefix = (cfg.apiKey ?? "").slice(0, 16);
+      if (localPrefix && toRevoke.some((k) => k.prefix === localPrefix)) {
+        process.stdout.write("  Your local key was revoked too — run `papera login` to mint a new one.\n");
+      }
+    } catch (e) {
+      handleError(e);
+    }
   });
 
 // ── new ────────────────────────────────────────────────────────────────────

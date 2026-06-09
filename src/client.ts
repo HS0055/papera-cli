@@ -184,6 +184,40 @@ export class PaperaClient {
     return { key: keyRes.key, email: loginRes.user?.email ?? email };
   }
 
+  /** Email+password → a session token only (for key management, which by
+   *  design cannot be driven by an API key). */
+  async loginSession(email: string, password: string): Promise<string> {
+    const loginRes = await this.req<{ sessionToken?: string }>("/api/auth/login", {
+      method: "POST",
+      body: { email, password },
+      auth: false,
+    });
+    if (!loginRes.sessionToken) {
+      throw new PaperaError("Login did not return a session token.", 500);
+    }
+    return loginRes.sessionToken;
+  }
+
+  /** List the account's active API keys (prefix only — never plaintext). */
+  async listKeys(sessionToken: string): Promise<
+    Array<{ id: string; prefix: string; name: string | null; createdAt: number; lastUsedAt: number | null }>
+  > {
+    const res = await this.req<{ keys?: Array<{ id: string; prefix: string; name: string | null; createdAt: number; lastUsedAt: number | null }> }>(
+      "/api/keys",
+      { token: sessionToken },
+    );
+    return Array.isArray(res.keys) ? res.keys : [];
+  }
+
+  /** Revoke one API key by id. Idempotent. */
+  async revokeKey(sessionToken: string, id: string): Promise<void> {
+    await this.req<{ revoked?: boolean }>("/api/keys/revoke", {
+      method: "POST",
+      body: { id },
+      token: sessionToken,
+    });
+  }
+
   // ── Notebooks ───────────────────────────────────────────────────────────
 
   /** Full notebooks payload (used by list + get + append). */

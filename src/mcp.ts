@@ -8,6 +8,7 @@
 // IMPORTANT: stdio transport owns stdout for the JSON-RPC protocol. Never
 // write to stdout here — diagnostics go to stderr only.
 
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -49,7 +50,10 @@ function errorToText(e: unknown): string {
 }
 
 export async function runMcpServer(): Promise<void> {
-  const server = new McpServer({ name: "papera", version: "0.1.0" });
+  const server = new McpServer({
+    name: "papera",
+    version: createRequire(import.meta.url)("../package.json").version as string,
+  });
 
   server.registerTool(
     "papera_create_page",
